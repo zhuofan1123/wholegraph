@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2023, NVIDIA CORPORATION.
+ * Copyright (c) 2019-2024, NVIDIA CORPORATION.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -59,6 +59,12 @@ size_t get_total_size(wholememory_handle_t wholememory_handle) noexcept;
 size_t get_data_granularity(wholememory_handle_t wholememory_handle) noexcept;
 
 wholememory_error_code_t get_local_memory_from_handle(
+  void** local_ptr,
+  size_t* local_size,
+  size_t* local_offset,
+  wholememory_handle_t wholememory_handle) noexcept;
+
+wholememory_error_code_t get_local_node_memory_from_handle(
   void** local_ptr,
   size_t* local_size,
   size_t* local_offset,

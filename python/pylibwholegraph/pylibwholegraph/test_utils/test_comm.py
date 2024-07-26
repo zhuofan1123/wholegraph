@@ -194,5 +194,7 @@ def int_to_wholememory_type(value: int):
         return wmb.WholeMemoryMemoryType.MtChunked
     if value == 2:
         return wmb.WholeMemoryMemoryType.MtDistributed
+    if value == 3:
+        return wmb.WholeMemoryMemoryType.MtHierarchy
     else:
         raise ValueError("invalid int_to_wholememory_type value")

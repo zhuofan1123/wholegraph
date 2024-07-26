@@ -145,6 +145,7 @@ def create_builtin_cache_policy(
         embedding_memory_type != "continuous"
         and embedding_memory_type != "chunked"
         and embedding_memory_type != "distributed"
+        and embedding_memory_type != "hierarchy"
     ):
         raise ValueError(f"embedding_memory_type={embedding_memory_type} is not valid")
 
@@ -415,6 +416,15 @@ def create_embedding(
             raise AssertionError
         ("The caching feature is not supported yet when using NVSHMEM."
          "Please consider disable it by passing cache_policy = None.")
+    if memory_type == 'hierarchy':
+        comm_backend = comm.distributed_backend
+        if comm_backend == 'nvshmem':
+            raise AssertionError
+        ("Hierarchy embedding is not supported yet when using NVSHMEM.")
+        if cache_policy is not None:
+            raise AssertionError
+        ("Hierarchy embedding is not supported yet when using cache.")
+        comm_backend = 'nccl'
 
     wm_embedding = WholeMemoryEmbedding(
         wmb.create_embedding(
