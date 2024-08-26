@@ -199,6 +199,8 @@ PRIVATE
     NCCL::NCCL
 )
 
+target_link_libraries(wholegraph PRIVATE CUDA::nvtx3)
+
 if (CUDAToolkit_VERSION VERSION_GREATER "12.3")
     # Link the NVML library if CUDA version is greater than 12.3
     target_link_libraries(wholegraph PRIVATE CUDA::nvml)

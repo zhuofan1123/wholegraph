@@ -1671,8 +1671,7 @@ class hierarchy_wholememory_impl : public wholememory_impl {
       int world_rank = -1, local_size = -1;
       wholememory_communicator_get_rank(&world_rank, global_comm);
       wholememory_communicator_get_local_size(&local_size, global_comm);
-      wholememory_split_communicator(
-        &cross_comm_, global_comm, world_rank % local_size, world_rank / local_size);
+      wholememory_split_communicator(&cross_comm_, global_comm, world_rank % 8, world_rank / 8);
     }
   }
   void create_memory() override
@@ -1824,9 +1823,7 @@ wholememory_error_code_t create_wholememory(wholememory_handle_t* wholememory_ha
         whole_memory_handle->impl = new distributed_wholememory_impl(
           whole_memory_handle, total_size, comm, memory_type, memory_location, data_granularity);
       }
-    } else if (memory_type == WHOLEMEMORY_MT_CONTINUOUS ||
-               (memory_type == WHOLEMEMORY_MT_HIERARCHY && is_intranode_communicator(comm)) ||
-               (memory_type == WHOLEMEMORY_MT_HIERARCHY && is_intra_mnnvl_communicator(comm))) {
+    } else if (memory_type == WHOLEMEMORY_MT_CONTINUOUS) {
       if (memory_type == WHOLEMEMORY_MT_HIERARCHY) {
         WHOLEMEMORY_WARN(
           "intra-node or intra-mnnvl HIERARCHY memory type is implemented as CONTINUOUS memory "
@@ -1881,8 +1878,7 @@ wholememory_error_code_t create_wholememory(wholememory_handle_t* wholememory_ha
         int world_rank = -1, local_size = -1;
         wholememory_communicator_get_rank(&world_rank, comm);
         wholememory_communicator_get_local_size(&local_size, comm);
-        wholememory_split_communicator(
-          &local_comm, comm, world_rank / local_size, world_rank % local_size);
+        wholememory_split_communicator(&local_comm, comm, world_rank / 8, world_rank % 8);
         whole_memory_handle->impl = new hierarchy_wholememory_impl(whole_memory_handle,
                                                                    total_size,
                                                                    comm,

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023, NVIDIA CORPORATION.
+ * Copyright (c) 2023-2024, NVIDIA CORPORATION.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -221,6 +221,7 @@ std::string get_memory_type_string(wholememory_memory_type_t memory_type)
     case WHOLEMEMORY_MT_CONTINUOUS: str = "WHOLEMEMORY_MT_CONTINUOUS"; break;
     case WHOLEMEMORY_MT_CHUNKED: str = "WHOLEMEMORY_MT_CHUNKED"; break;
     case WHOLEMEMORY_MT_DISTRIBUTED: str = "WHOLEMEMORY_MT_DISTRIBUTED"; break;
+    case WHOLEMEMORY_MT_HIERARCHY: str = "WHOLEMEMORY_MT_HIERARCHY"; break;
     default: break;
   }
   return str;
@@ -436,7 +437,7 @@ int main(int argc, char** argv)
       case 'h': printf(usage, argv[0]); exit(EXIT_SUCCESS);
       case 't':
         val = strtol(optarg, &endptr, 10);
-        if (*endptr != '\0' || val < 0 || val > 3) {
+        if (*endptr != '\0' || val < 0 || val > 4) {
           printf("Invalid argument for option -t\n");
           printf(usage, argv[0]);
           exit(EXIT_FAILURE);
