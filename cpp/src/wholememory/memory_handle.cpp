@@ -1671,15 +1671,16 @@ class hierarchy_wholememory_impl : public wholememory_impl {
       int world_rank = -1, local_size = -1;
       wholememory_communicator_get_rank(&world_rank, global_comm);
       wholememory_communicator_get_local_size(&local_size, global_comm);
-      wholememory_split_communicator(
-        &cross_comm_, global_comm, world_rank % local_size, world_rank / local_size);
+      wholememory_split_communicator(&cross_comm_, global_comm, world_rank % 4, world_rank / 4);
     }
   }
   void create_memory() override
   {
     std::unique_lock<std::mutex> mlock(local_comm_->mu);
-    local_memory_handle_            = new wholememory_handle_();
-    local_memory_handle_->handle_id = negotiate_handle_id_with_comm_locked(local_comm_);
+    local_memory_handle_                   = new wholememory_handle_();
+    local_memory_handle_->handle_id        = negotiate_handle_id_with_comm_locked(local_comm_);
+    cross_gather_buffer_handle_            = new wholememory_handle_();
+    cross_gather_buffer_handle_->handle_id = negotiate_handle_id_with_comm_locked(local_comm_);
     determine_node_size();
 
     WM_COMM_CHECK_ALL_SAME(local_comm_, WM_MEM_OP_CREATE);
@@ -1690,7 +1691,7 @@ class hierarchy_wholememory_impl : public wholememory_impl {
     WM_COMM_CHECK_ALL_SAME(local_comm_, wcp);
 
     // TODO chunkded memory type and nvshmem type are both not supported yet.
-    if (is_intranode_communicator(local_comm_) || !SupportEGM())
+    if (is_intranode_communicator(local_comm_) || !SupportEGM()) {
       if (location_ == WHOLEMEMORY_ML_HOST) {
         local_memory_handle_->impl =
           new global_mapped_host_wholememory_impl(local_memory_handle_,
@@ -1710,7 +1711,15 @@ class hierarchy_wholememory_impl : public wholememory_impl {
       } else {
         WHOLEMEMORY_ERROR("unsupported memory location");
       }
-    else {
+      // printf("cross gather total size: %ld\n", node_partition_strategy_.local_mem_size);
+      cross_gather_buffer_handle_->impl =
+        new continuous_device_wholememory_impl(cross_gather_buffer_handle_,
+                                               node_partition_strategy_.local_mem_size * 4,
+                                               local_comm_,
+                                               WHOLEMEMORY_MT_CONTINUOUS,
+                                               WHOLEMEMORY_ML_DEVICE,
+                                               data_granularity_ * 4);
+    } else {
 #if CUDA_VERSION >= 12030
       local_memory_handle_->impl =
         new continuous_mnnvl_wholememory_impl(local_memory_handle_,
@@ -1719,13 +1728,23 @@ class hierarchy_wholememory_impl : public wholememory_impl {
                                               WHOLEMEMORY_MT_CONTINUOUS,
                                               location_,
                                               data_granularity_);
+      cross_gather_buffer_handle_->impl =
+        new continuous_mnnvl_wholememory_impl(local_memory_handle_,
+                                              node_partition_strategy_.local_mem_size,
+                                              local_comm_,
+                                              WHOLEMEMORY_MT_CONTINUOUS,
+                                              WHOLEMEMORY_ML_DEVICE,
+                                              data_granularity_);
 #else
       WHOLEMEMORY_FAIL_NOTHROW("Multinode CONTINOUS is only supported on CUDA version >= 12.3");
 #endif
     }
     local_memory_handle_->impl->create_memory();
+    cross_gather_buffer_handle_->impl->create_memory();
     local_comm_->wholememory_map.insert(
       std::pair<int, wholememory_handle_t>(local_memory_handle_->handle_id, local_memory_handle_));
+    local_comm_->wholememory_map.insert(std::pair<int, wholememory_handle_t>(
+      cross_gather_buffer_handle_->handle_id, cross_gather_buffer_handle_));
     local_node_memory_pointer_ = local_memory_handle_->impl->get_continuous_mapping_pointer();
   }
   [[nodiscard]] wholememory_gref_t get_global_reference() const noexcept override
@@ -1748,6 +1767,11 @@ class hierarchy_wholememory_impl : public wholememory_impl {
     *local_node_ptr    = local_node_memory_pointer_;
     *local_node_size   = node_partition_strategy_.local_mem_size;
     *local_node_offset = node_partition_strategy_.local_mem_offset;
+  }
+  void get_cross_gather_buffer_memory(void** buffer_ptr)
+  {
+    *buffer_ptr = cross_gather_buffer_handle_->impl->get_continuous_mapping_pointer();
+    ;
   }
   [[nodiscard]] size_t get_partition_stride() const override
   {
@@ -1782,6 +1806,7 @@ class hierarchy_wholememory_impl : public wholememory_impl {
   }
 
   wholememory_handle_t local_memory_handle_;
+  wholememory_handle_t cross_gather_buffer_handle_;
   wholememory_comm_t local_comm_;
   wholememory_comm_t cross_comm_;
   void* local_node_memory_pointer_;
@@ -1824,9 +1849,7 @@ wholememory_error_code_t create_wholememory(wholememory_handle_t* wholememory_ha
         whole_memory_handle->impl = new distributed_wholememory_impl(
           whole_memory_handle, total_size, comm, memory_type, memory_location, data_granularity);
       }
-    } else if (memory_type == WHOLEMEMORY_MT_CONTINUOUS ||
-               (memory_type == WHOLEMEMORY_MT_HIERARCHY && is_intranode_communicator(comm)) ||
-               (memory_type == WHOLEMEMORY_MT_HIERARCHY && is_intra_mnnvl_communicator(comm))) {
+    } else if (memory_type == WHOLEMEMORY_MT_CONTINUOUS) {
       if (memory_type == WHOLEMEMORY_MT_HIERARCHY) {
         WHOLEMEMORY_WARN(
           "intra-node or intra-mnnvl HIERARCHY memory type is implemented as CONTINUOUS memory "
@@ -1881,8 +1904,7 @@ wholememory_error_code_t create_wholememory(wholememory_handle_t* wholememory_ha
         int world_rank = -1, local_size = -1;
         wholememory_communicator_get_rank(&world_rank, comm);
         wholememory_communicator_get_local_size(&local_size, comm);
-        wholememory_split_communicator(
-          &local_comm, comm, world_rank / local_size, world_rank % local_size);
+        wholememory_split_communicator(&local_comm, comm, world_rank / 4, world_rank % 4);
         whole_memory_handle->impl = new hierarchy_wholememory_impl(whole_memory_handle,
                                                                    total_size,
                                                                    comm,
@@ -2051,6 +2073,23 @@ wholememory_error_code_t get_local_node_memory_from_handle(
   hierarchy_wholememory_impl* hierarchy_impl =
     dynamic_cast<hierarchy_wholememory_impl*>(wholememory_handle->impl);
   hierarchy_impl->get_local_node_memory(local_ptr, local_size, local_offset);
+  return WHOLEMEMORY_SUCCESS;
+}
+
+wholememory_error_code_t get_cross_gather_buffer_memory_from_handle(
+  void** buffer_ptr, wholememory_handle_t wholememory_handle) noexcept
+{
+  if (get_memory_type(wholememory_handle) != WHOLEMEMORY_MT_HIERARCHY) {
+    WHOLEMEMORY_ERROR(
+      "Only Hierarchy memory type support get_cross_gather_buffer_memory function.");
+    return WHOLEMEMORY_INVALID_INPUT;
+  }
+  if (wholememory_handle == nullptr || wholememory_handle->impl == nullptr) {
+    return WHOLEMEMORY_INVALID_INPUT;
+  }
+  hierarchy_wholememory_impl* hierarchy_impl =
+    dynamic_cast<hierarchy_wholememory_impl*>(wholememory_handle->impl);
+  hierarchy_impl->get_cross_gather_buffer_memory(buffer_ptr);
   return WHOLEMEMORY_SUCCESS;
 }
 

@@ -15,6 +15,8 @@
  */
 #include <cuda_runtime_api.h>
 
+#include <cub/cub.cuh>
+
 #include <wholememory/env_func_ptrs.h>
 #include <wholememory/wholememory.h>
 
@@ -24,6 +26,7 @@
 #include "wholememory_ops/functions/bucket_ids_for_hierarchy_func.h"
 #include "wholememory_ops/functions/exchange_embeddings_nccl_func.h"
 #include "wholememory_ops/functions/gather_scatter_func.h"
+#include "wholememory_ops/functions/map_indices_for_hierarchy.h"
 #include "wholememory_ops/functions/sort_unique_ids_for_hierarchy_func.h"
 #include "wholememory_ops/gather_op_impl.h"
 #include "wholememory_ops/temp_memory_handle.hpp"
@@ -130,7 +133,6 @@ wholememory_error_code_t wholememory_gather_hierarchy(
         wholememory_desc.storage_offset + wholememory_desc.sizes[1] > wholememory_desc.stride) {
       return WHOLEMEMORY_INVALID_INPUT;
     }
-
     bool sort_unique_indices = true;
 
     wm_thrust_allocator thrust_allocator(p_env_fns);
@@ -272,13 +274,39 @@ wholememory_error_code_t wholememory_gather_hierarchy(
     }
     WM_CUDA_CHECK(cudaStreamSynchronize(stream));
     // cross gather
-    temp_memory_handle dev_cross_gather_buffer_handle(p_env_fns);
-    void* dev_cross_gather_buffer_ptr = dev_cross_gather_buffer_handle.device_malloc(
-      wholememory_desc.sizes[1] * cross_gather_indices_desc.size, output_desc.dtype);
-    int64_t cross_gather_buffer_size[2]                       = {cross_gather_indices_desc.size,
+    // temp_memory_handle dev_cross_gather_buffer_handle(p_env_fns);
+    // void* dev_cross_gather_buffer_ptr = dev_cross_gather_buffer_handle.device_malloc(
+    //   wholememory_desc.sizes[1] * cross_gather_indices_desc.size, output_desc.dtype);
+    int64_t cross_gather_buffer_sizes[2]                      = {cross_gather_indices_desc.size,
                                                                  wholememory_desc.sizes[1]};
     wholememory_matrix_description_t cross_gather_buffer_desc = wholememory_create_matrix_desc(
-      cross_gather_buffer_size, wholememory_desc.sizes[1], 0, output_desc.dtype);
+      cross_gather_buffer_sizes, wholememory_desc.sizes[1], 0, output_desc.dtype);
+
+    void* cross_gather_continuous_global_buffer;
+    wholememory_get_cross_gather_buffer_memory(&cross_gather_continuous_global_buffer,
+                                               wholememory_handle);
+    std::vector<int64_t> cross_gather_count_from_local(local_size);
+    std::vector<int64_t> cross_gather_offset_from_local(local_size + 1, 0);
+    wm_local_comm->host_allgather(&cross_gather_indices_desc.size,
+                                  cross_gather_count_from_local.data(),
+                                  1,
+                                  WHOLEMEMORY_DT_INT64);
+    wm_local_comm->sync_stream(stream);
+    WM_CUDA_CHECK(cudaGetLastError());
+
+    for (int i = 1; i <= local_size; i++) {
+      cross_gather_offset_from_local[i] =
+        cross_gather_offset_from_local[i - 1] + cross_gather_count_from_local[i - 1];
+    }
+    int64_t cross_gather_buffer_offset =
+      cross_gather_offset_from_local[local_rank] * wholememory_desc.sizes[1] *
+      wholememory_dtype_get_element_size(cross_gather_buffer_desc.dtype);
+    int64_t cross_gather_total_count = cross_gather_offset_from_local[local_size];
+    // printf("local rank%d, cross gather size: %ld, offset: %ld\n", local_rank,
+    // cross_gather_indices_desc.size, cross_gather_buffer_offset);
+    void* dev_cross_gather_buffer_ptr =
+      static_cast<char*>(cross_gather_continuous_global_buffer) + cross_gather_buffer_offset;
+
     wholememory_cross_gather(wholememory_handle,
                              wholememory_desc,
                              cross_gather_indices_handle.pointer(),
@@ -293,45 +321,32 @@ wholememory_error_code_t wholememory_gather_hierarchy(
                              p_env_fns,
                              stream,
                              gather_sms);
-    // cross gather reorder
-    temp_memory_handle dev_embedding_map_buffer_handle(p_env_fns);
-    void* dev_embedding_map_buffer_ptr = dev_embedding_map_buffer_handle.device_malloc(
-      wholememory_desc.sizes[1] * total_recv_count, output_desc.dtype);
-    int64_t embedding_map_buffer_size[2] = {total_recv_count, wholememory_desc.sizes[1]};
-    wholememory_matrix_description_t embedding_map_buffer_desc = wholememory_create_matrix_desc(
-      embedding_map_buffer_size, wholememory_desc.sizes[1], 0, output_desc.dtype);
-    wholememory_gref_t cross_gather_fake_gref =
-      wholememory_create_continuous_global_reference(dev_cross_gather_buffer_ptr);
-    WHOLEMEMORY_RETURN_ON_FAIL(gather_func(cross_gather_fake_gref,
-                                           cross_gather_buffer_desc,
-                                           dev_cross_gather_id_map_handle.pointer(),
-                                           recv_bucket_indices_desc,
-                                           dev_embedding_map_buffer_ptr,
-                                           embedding_map_buffer_desc,
-                                           stream,
-                                           gather_sms));
-    // exchange embeddings
-    size_t output_embedding_size =
-      wholememory_desc.sizes[1] * wholememory_dtype_get_element_size(output_desc.dtype);
-    temp_memory_handle dev_recv_embedding_buffer_handle(p_env_fns);
-    void* dev_recv_embedding_buffer_ptr = dev_recv_embedding_buffer_handle.device_malloc(
-      wholememory_desc.sizes[1] * indice_desc.size, output_desc.dtype);
-    WHOLEMEMORY_RETURN_ON_FAIL(exchange_embeddings_nccl_func(dev_embedding_map_buffer_ptr,
-                                                             host_recv_id_count.data(),
-                                                             host_bucket_id_count.data(),
-                                                             dev_recv_embedding_buffer_ptr,
-                                                             output_embedding_size,
-                                                             wm_local_comm,
-                                                             stream));
+    // map conti indices
+    temp_memory_handle conti_id_map_handle(p_env_fns);
+    void* conti_id_map_ptr = conti_id_map_handle.device_malloc(indice_desc.size, indice_desc.dtype);
+    map_indices_for_hierarchy(dev_cross_gather_id_map_handle.pointer(),
+                              recv_bucket_indices_desc,
+                              dev_bucket_ids_map_ptr,
+                              indice_desc,
+                              conti_id_map_ptr,
+                              cross_gather_count_from_local.data(),
+                              host_bucket_id_count.data(),
+                              host_bucket_id_offset.data(),
+                              host_recv_id_count.data(),
+                              host_recv_id_offset.data(),
+                              wm_local_comm,
+                              &thrust_allocator,
+                              p_env_fns,
+                              stream);
     // bucket reorder
     wholememory_gref_t recv_embedding_buffer_fake_gref =
-      wholememory_create_continuous_global_reference(dev_recv_embedding_buffer_ptr);
-    int64_t recv_embedding_buffer_size[2] = {indice_desc.size, wholememory_desc.sizes[1]};
+      wholememory_create_continuous_global_reference(cross_gather_continuous_global_buffer);
+    int64_t recv_embedding_buffer_size[2] = {cross_gather_total_count, wholememory_desc.sizes[1]};
     wholememory_matrix_description_t recv_embedding_buffer_desc = wholememory_create_matrix_desc(
       recv_embedding_buffer_size, wholememory_desc.sizes[1], 0, output_desc.dtype);
     WHOLEMEMORY_RETURN_ON_FAIL(gather_func(recv_embedding_buffer_fake_gref,
                                            recv_embedding_buffer_desc,
-                                           dev_bucket_ids_map_ptr,
+                                           conti_id_map_ptr,
                                            indice_desc,
                                            output,
                                            output_desc,

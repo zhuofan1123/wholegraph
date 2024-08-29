@@ -355,11 +355,19 @@ wholememory_error_code_t wholememory_get_local_memory(void** local_ptr,
  * @param wholememory_handle : WholeMemory Handle
  * @return : wholememory_error_code_t
  */
-
 wholememory_error_code_t wholememory_get_local_node_memory(void** local_ptr,
                                                            size_t* local_size,
                                                            size_t* local_offset,
                                                            wholememory_handle_t wholememory_handle);
+
+/**
+ * Get buffer pointer from WholeMemory Handle for cross gather
+ * @param buffer_ptr : returned cross gather buffer memory pointer
+ * @param wholememory_handle : WholeMemory Handle
+ * @return : wholememory_error_code_t
+ */
+wholememory_error_code_t wholememory_get_cross_gather_buffer_memory(
+  void** buffer_ptr, wholememory_handle_t wholememory_handle);
 
 /**
  * Get local memory of specified rank from WholeMemory Handle

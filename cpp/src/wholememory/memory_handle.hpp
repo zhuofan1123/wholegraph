@@ -76,6 +76,9 @@ wholememory_error_code_t get_local_node_memory_from_handle(
   size_t* local_offset,
   wholememory_handle_t wholememory_handle) noexcept;
 
+wholememory_error_code_t get_cross_gather_buffer_memory_from_handle(
+  void** buffer_ptr, wholememory_handle_t wholememory_handle) noexcept;
+
 wholememory_error_code_t get_rank_memory_from_handle(
   void** rank_memory_ptr,
   size_t* rank_memory_size,

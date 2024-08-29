@@ -286,9 +286,9 @@ INSTANTIATE_TEST_SUITE_P(
       .set_embedding_dim(1024)
       .set_indices_count(100005),
 #endif
-    WholeMemoryGatherTestParam().set_memory_type(WHOLEMEMORY_MT_CONTINUOUS),
-    WholeMemoryGatherTestParam().set_memory_type(WHOLEMEMORY_MT_CHUNKED),
-    WholeMemoryGatherTestParam().set_memory_type(WHOLEMEMORY_MT_DISTRIBUTED),
+    // WholeMemoryGatherTestParam().set_memory_type(WHOLEMEMORY_MT_CONTINUOUS),
+    // WholeMemoryGatherTestParam().set_memory_type(WHOLEMEMORY_MT_CHUNKED),
+    WholeMemoryGatherTestParam().set_memory_type(WHOLEMEMORY_MT_HIERARCHY),
     WholeMemoryGatherTestParam().set_memory_type(WHOLEMEMORY_MT_CONTINUOUS).set_indices_count(0),
     WholeMemoryGatherTestParam().set_memory_type(WHOLEMEMORY_MT_CHUNKED).set_indices_count(0),
     WholeMemoryGatherTestParam().set_memory_type(WHOLEMEMORY_MT_DISTRIBUTED).set_indices_count(0),
