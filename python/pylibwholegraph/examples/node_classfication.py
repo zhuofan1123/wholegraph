@@ -107,6 +107,8 @@ def train(train_data, valid_data, model, optimizer, wm_optimizer, global_comm):
                     )
                 )
             train_step = train_step + 1
+            if train_step >= 10:
+                break
         epoch = epoch + 1
     global_comm.barrier()
     train_end_time = time.time()
