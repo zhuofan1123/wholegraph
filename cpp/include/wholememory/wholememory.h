@@ -349,20 +349,6 @@ wholememory_error_code_t wholememory_get_local_memory(void** local_ptr,
                                                       wholememory_handle_t wholememory_handle);
 
 /**
- * Get local node memory from WholeMemory Handle, all gpus of the rank has direct access to the
- * memory. Note that this is only available for WHOLEMEMORY_MT_HIERARCHY memory type.
- * @param local_ptr : returned local node memory pointer
- * @param local_size : returned local node memory size
- * @param local_offset : returned local node memory offset from WholeMemory
- * @param wholememory_handle : WholeMemory Handle
- * @return : wholememory_error_code_t
- */
-wholememory_error_code_t wholememory_get_local_node_memory(void** local_ptr,
-                                                           size_t* local_size,
-                                                           size_t* local_offset,
-                                                           wholememory_handle_t wholememory_handle);
-
-/**
  * Get local memory size from WholeMemory Handle of current rank
  * @param local_size : returned local memory size
  * @param wholememory_handle : WholeMemory Handle
